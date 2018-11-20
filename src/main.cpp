@@ -8,6 +8,7 @@
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
+#include "spline.h"     // GPLv2 from https://kluge.in-chemnitz.de/opensource/spline/
 
 using namespace std;
 using json = nlohmann::json;
@@ -228,6 +229,17 @@ int main() {
           // TODO: Path planner: Create vector of next x,y coordinates for simulator
         	vector<double> next_x_vals;
         	vector<double> next_y_vals;
+
+          double dist_inc = 0.5;
+          for(int i = 0; i < 50; i++)
+          {
+            double next_s = ego_s + (i*1)*dist_inc;
+            double next_d = 6;
+            vector<double> xy = getXY(next_s, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+
+            next_x_vals.push_back(xy[0]);
+            next_y_vals.push_back(xy[1]);
+          }
 
           // Prepare JSON object and provide ego path as x,y coordinates to simulator
         	json msgJson;
