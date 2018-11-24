@@ -10,6 +10,7 @@
 #include "json.hpp"
 #include "spline.h"     // GPLv2 from https://kluge.in-chemnitz.de/opensource/spline/
 
+
 using namespace std;
 using json = nlohmann::json;
 
@@ -73,7 +74,7 @@ int NextWaypoint(double x, double y, double theta, const vector<double> &maps_x,
 	double heading = atan2((map_y-y),(map_x-x));
 	double angle = fabs(theta-heading);
   angle = min(2*pi() - angle, angle);
-  if(angle > pi()/4)
+  if(angle > pi()/2)
   {
     closestWaypoint++;
     if (closestWaypoint == maps_x.size())
@@ -82,6 +83,31 @@ int NextWaypoint(double x, double y, double theta, const vector<double> &maps_x,
     }
   }
   return closestWaypoint;
+}
+
+
+// Provide next waypoint based on s coordinate
+int PrevWaypoint_s(double s, const vector<double> &maps_s)
+{
+	int prev_wp = -1;
+  // wrap around end of list
+	while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) ))
+	{
+		prev_wp++;
+	}
+  // return value
+	return prev_wp;
+}
+
+
+// Provide next waypoint based on s coordinate
+int NextWaypoint_s(double s, const vector<double> &maps_s)
+{
+	int prev_wp = PrevWaypoint_s(s, maps_s);
+  // calculate next waypoint: wrap-around at end of array
+  int next_wp = (prev_wp+1)%maps_s.size();
+  // return value
+	return next_wp;
 }
 
 
@@ -129,30 +155,45 @@ vector<double> getFrenet(double x, double y, double theta, const vector<double> 
 
 
 // Transform from Frenet s,d coordinates to Cartesian x,y
-vector<double> getXY(double s, double d, const vector<double> &maps_s, const vector<double> &maps_x, const vector<double> &maps_y)
+vector<double> getXY(double s, double d,
+  tk::spline &s_x, tk::spline &s_y, tk::spline &s_dx, tk::spline &s_dy)
 {
-	int prev_wp = -1;
-  // wrap around end of list
-	while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) ))
-	{
-		prev_wp++;
-	}
-  // prepare additional waypoint
-  int wp2 = (prev_wp+1)%maps_x.size();
-	// calculate heading
-	double heading = atan2((maps_y[wp2]-maps_y[prev_wp]),(maps_x[wp2]-maps_x[prev_wp]));
-	// the x,y,s along the segment
-	double seg_s = (s-maps_s[prev_wp]);
-	double seg_x = maps_x[prev_wp]+seg_s*cos(heading);
-	double seg_y = maps_y[prev_wp]+seg_s*sin(heading);
-  // perpendicular heading
-	double perp_heading = heading-pi()/2;
-  // calculate final x,y coordinates
-	double x = seg_x + d*cos(perp_heading);
-	double y = seg_y + d*sin(perp_heading);
-  // return values
+  // Get interpolated x,y,dx,dy values from spline by referencing s-value
+  double path_x = s_x(s);
+  double path_y = s_y(s);
+  double dx = s_dx(s);
+  double dy = s_dy(s);
+  // Calculate final x,y pair by taking lateral displacement d into account
+  double x = path_x + d*dx;
+  double y = path_y + d*dy;
 	return {x,y};
 }
+
+// // Transform from Frenet s,d coordinates to Cartesian x,y
+// vector<double> getXY(double s, double d, const vector<double> &maps_s, const vector<double> &maps_x, const vector<double> &maps_y)
+// {
+// 	int prev_wp = -1;
+//   // wrap around end of list
+// 	while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) ))
+// 	{
+// 		prev_wp++;
+// 	}
+//   // prepare additional waypoint
+//   int wp2 = (prev_wp+1)%maps_x.size();
+// 	// calculate heading
+// 	double heading = atan2((maps_y[wp2]-maps_y[prev_wp]),(maps_x[wp2]-maps_x[prev_wp]));
+// 	// the x,y,s along the segment
+// 	double seg_s = (s-maps_s[prev_wp]);
+// 	double seg_x = maps_x[prev_wp]+seg_s*cos(heading);
+// 	double seg_y = maps_y[prev_wp]+seg_s*sin(heading);
+//   // perpendicular heading
+// 	double perp_heading = heading-pi()/2;
+//   // calculate final x,y coordinates
+// 	double x = seg_x + d*cos(perp_heading);
+// 	double y = seg_y + d*sin(perp_heading);
+//   // return values
+// 	return {x,y};
+// }
 
 
 // Main function
@@ -193,6 +234,13 @@ int main() {
   	map_WPs_dy.push_back(d_y);
   }
 
+  // Create splines interpolation for each map attribute (x,y,dx,dy) in dependence on s
+  tk::spline map_s_x, map_s_y, map_s_dx, map_s_dy;
+  map_s_x.set_points(map_WPs_s,map_WPs_x);
+  map_s_y.set_points(map_WPs_s,map_WPs_y);
+  map_s_dx.set_points(map_WPs_s,map_WPs_dx);
+  map_s_dy.set_points(map_WPs_s,map_WPs_dy);
+
   // Start in center lane (lane 1)
   int lane = 1;
 
@@ -200,7 +248,7 @@ int main() {
   // double ref_v = 49.6; //mph
   double ref_v = 0.0; //mph
 
-  h.onMessage([&map_WPs_x,&map_WPs_y,&map_WPs_s,&map_WPs_dx,&map_WPs_dy,&ref_v,&lane]
+  h.onMessage([&map_s_x,&map_s_y,&map_s_dx,&map_s_dy,&ref_v,&lane]
     (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -244,6 +292,7 @@ int main() {
           bool too_close = false;
 
           // find ref_v to use
+          // std::cout << "Other cars: " << sensor_fusion.size() << ", s: " << ego_s << std::endl;
           for (int j=0; j < sensor_fusion.size(); ++j) {
             // car is in my lane
             float d = sensor_fusion[j][6];
@@ -313,15 +362,19 @@ int main() {
             ptsy.push_back(ref_y);
           }
 
-          // In Frenet add evenly 30m spaced points ahead of the starting reference
-          vector<double> next_wp0 = getXY(ego_s+30,(2+4*lane),map_WPs_s,map_WPs_x,map_WPs_y);
-          vector<double> next_wp1 = getXY(ego_s+60,(2+4*lane),map_WPs_s,map_WPs_x,map_WPs_y);
-          vector<double> next_wp2 = getXY(ego_s+90,(2+4*lane),map_WPs_s,map_WPs_x,map_WPs_y);
+          // Calculate previous and upcoming waypoints
+          // int prevWP = PrevWaypoint_s(ego_s, map_WPs_s); // TODO: check if really needed
+          // int nextWP1 = NextWaypoint_s(ego_s, map_WPs_s);
+          // int nextWP2 = (nextWP1 + 1)%map_WPs_s.size();
+          // int nextWP3 = (nextWP2 + 1)%map_WPs_s.size();
 
+          // In Frenet add evenly 30m spaced points ahead of the starting reference
+          vector<double> next_wp0 = getXY(ego_s+30,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
+          vector<double> next_wp1 = getXY(ego_s+60,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
+          vector<double> next_wp2 = getXY(ego_s+90,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
           ptsx.push_back(next_wp0[0]);
           ptsx.push_back(next_wp1[0]);
           ptsx.push_back(next_wp2[0]);
-
           ptsy.push_back(next_wp0[1]);
           ptsy.push_back(next_wp1[1]);
           ptsy.push_back(next_wp2[1]);
@@ -346,6 +399,10 @@ int main() {
           vector<double> next_y_vals;
 
           // Start with all the previous path points from the last time
+          if (previous_path_x.size() > 0){
+            std::cout << "Previous points: " << previous_path_x.size() << ". Example: ";
+            std::cout << previous_path_x[1] << "," << previous_path_y[1] << std::endl;
+          }
           for(int j = 0; j < previous_path_x.size(); ++j) {
             next_x_vals.push_back(previous_path_x[j]);
             next_y_vals.push_back(previous_path_y[j]);
@@ -380,21 +437,6 @@ int main() {
             next_y_vals.push_back(y_point);
           }
 
-
-          // TODO: Path planner: Create vector of next x,y coordinates for simulator
-        	// vector<double> next_x_vals;
-        	// vector<double> next_y_vals;
-
-          // double dist_inc = 0.5;
-          // for(int i = 0; i < 50; i++)
-          // {
-          //   double next_s = ego_s + (i*1)*dist_inc;
-          //   double next_d = 6;
-          //   vector<double> xy = getXY(next_s, next_d, map_WPs_s, map_WPs_x, map_WPs_y);
-          //
-          //   next_x_vals.push_back(xy[0]);
-          //   next_y_vals.push_back(xy[1]);
-          // }
 
           // Prepare JSON object and provide ego path as x,y coordinates to simulator
         	json msgJson;
