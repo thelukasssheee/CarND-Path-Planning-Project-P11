@@ -287,12 +287,11 @@ int main() {
 
           // Sensor fusion input
           if (prev_size > 0) {
-            ego_s = end_path_s;
+            // ego_s = end_path_s;
           }
           bool too_close = false;
 
           // find ref_v to use
-          // std::cout << "Other cars: " << sensor_fusion.size() << ", s: " << ego_s << std::endl;
           for (int j=0; j < sensor_fusion.size(); ++j) {
             // car is in my lane
             float d = sensor_fusion[j][6];
@@ -310,9 +309,9 @@ int main() {
                 // in front of us. Could also flag to try to change lanes.
                 // ref_v = 29.5; // mph
                 too_close = true;
-                if (lane > 0) {
-                  lane = 0;
-                }
+                // if (lane > 0) {
+                //   lane = 0;
+                // }
               }
             }
           }
@@ -326,52 +325,73 @@ int main() {
             }
           }
 
+          // double dist_inc = ref_v/2.24*0.02;
+          // for (int j=0; j < 500; j++) {
+          //   double next_s = ego_s + (j+1)*dist_inc;
+          //   vector<double> xy = getXY(next_s,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
+          //   next_x_vals.push_back(xy[0]);
+          //   next_y_vals.push_back(xy[1]);
+          // }
+
           // Create list with widely spaced waypoints, approximately 30m
           vector<double> ptsx;
           vector<double> ptsy;
 
-          // Reference state
+          // // Reference state  // shifted some lines below
+          // double ref_x = ego_x;
+          // double ref_y = ego_y;
+          // double ref_yaw = deg2rad(ego_yaw);
+
           double ref_x = ego_x;
           double ref_y = ego_y;
+          double ref_s = ego_s;
+          double ref_d = ego_d;
           double ref_yaw = deg2rad(ego_yaw);
-
           // If previous size is almost empty, use ego as starting reference
           if(prev_size < 2) {
             // Use current position and yaw angle to calculate tangent to car
-            double prev_ego_x = ego_x - cos(ego_yaw);
-            double prev_ego_y = ego_y - sin(ego_yaw);
-            ptsx.push_back(prev_ego_x);
-            ptsx.push_back(ego_x);
-            ptsy.push_back(prev_ego_y);
-            ptsy.push_back(ego_y);
-          }
+            double ref_x_prev = ego_x - cos(ref_yaw);
+            double ref_y_prev = ego_y - sin(ref_yaw);
 
-          // Enough previous points are available. Generate reference from last two points of path
-          else {
-            // Redefine reference state as previous path end point
-            ref_x = previous_path_x[prev_size - 1];
-            ref_y = previous_path_y[prev_size - 1];
-            double ref_x_prev = previous_path_x[prev_size - 2];
-            double ref_y_prev = previous_path_y[prev_size - 2];
-            ref_yaw = atan2(ref_y-ref_y_prev, ref_x-ref_x_prev);
-
-            // Use two points that make the path tangent to the previous path's end point
             ptsx.push_back(ref_x_prev);
             ptsx.push_back(ref_x);
             ptsy.push_back(ref_y_prev);
             ptsy.push_back(ref_y);
+            // double ref_x = ego_x;
+            // double ref_y = ego_y;
+            // double ref_yaw = deg2rad(ego_yaw);
           }
-
-          // Calculate previous and upcoming waypoints
-          // int prevWP = PrevWaypoint_s(ego_s, map_WPs_s); // TODO: check if really needed
-          // int nextWP1 = NextWaypoint_s(ego_s, map_WPs_s);
-          // int nextWP2 = (nextWP1 + 1)%map_WPs_s.size();
-          // int nextWP3 = (nextWP2 + 1)%map_WPs_s.size();
+          // Enough previous points are available. Generate reference from last two points of path
+          else {
+            // Redefine reference state as previous path end point
+            ref_s = end_path_s;
+            ref_d = end_path_d;
+            ref_x = previous_path_x[prev_size - 1];
+            ref_y = previous_path_y[prev_size - 1];
+            // Also include point right before that time step
+            double ref_x_prev = previous_path_x[prev_size - 2];
+            double ref_y_prev = previous_path_y[prev_size - 2];
+            // Calculate yaw based on these two points
+            ref_yaw = atan2(ref_y-ref_y_prev, ref_x-ref_x_prev);
+            // Use last two points to make the path tangent to the previous path's end point
+            ptsx.push_back(ref_x_prev);
+            ptsx.push_back(ref_x);
+            ptsy.push_back(ref_y_prev);
+            ptsy.push_back(ref_y);
+            // cout << "Previous x,y: " << ref_x_prev << "," << ref_y_prev << ". ";
+            // cout << "Current x,y: " << ref_x << "," << ref_y << "." << endl;
+          }
+          printf("Ego/ref yaw: %6.2f/%6.2f\n", deg2rad(ego_yaw), ref_yaw);
+          printf("Ego s/d: %6.1f/%5.2f\n", ego_s, ego_d);
+          printf("Ref s/d: %6.1f/%5.2f\n", ref_s, ref_d);
 
           // In Frenet add evenly 30m spaced points ahead of the starting reference
-          vector<double> next_wp0 = getXY(ego_s+30,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
-          vector<double> next_wp1 = getXY(ego_s+60,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
-          vector<double> next_wp2 = getXY(ego_s+90,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
+          vector<double> next_wp0 = getXY(ref_s+ 30,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
+          vector<double> next_wp1 = getXY(ref_s+ 60,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
+          vector<double> next_wp2 = getXY(ref_s+ 90,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
+          // vector<double> next_wp0 = getXY(ego_s+ 30,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
+          // vector<double> next_wp1 = getXY(ego_s+ 60,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
+          // vector<double> next_wp2 = getXY(ego_s+ 90,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
           ptsx.push_back(next_wp0[0]);
           ptsx.push_back(next_wp1[0]);
           ptsx.push_back(next_wp2[0]);
@@ -379,19 +399,30 @@ int main() {
           ptsy.push_back(next_wp1[1]);
           ptsy.push_back(next_wp2[1]);
 
+          // Transform spline's base/reference points to car coordinate system
           for (int j = 0; j < ptsx.size(); ++j ) {
-            // Shift car reference angle to 0 degrees
-            double shift_x = ptsx[j] - ref_x;
+            // Transform to car coordinate system (subtract ref x,y global position)
+            double shift_x = ptsx[j] - ref_x;   // Ref x,y is at end of previous path (i.e. future)
             double shift_y = ptsy[j] - ref_y;
-
+            // Shift car reference angle to 0 degrees
             ptsx[j] = (shift_x * cos(0-ref_yaw) - shift_y*sin(0-ref_yaw));
-            ptsy[j] = (shift_y * sin(0-ref_yaw) + shift_y*cos(0-ref_yaw));
+            ptsy[j] = (shift_x * sin(0-ref_yaw) + shift_y*cos(0-ref_yaw));
           }
 
-          // create a spline
-          tk::spline s;
+          cout << "Spline x,y: ";
+          for (int j = 0; j < ptsx.size(); ++j ) {
+            printf("%4.1f/%4.1f | ", ptsx[j], ptsy[j]);
+          }
+          cout << endl;
+          // cout << "Spline s,d: ";
+          // for (int j = 0; j < ptsx.size(); ++j ) {
+          //   vector<double> sdconv = getFrenet(ptsx[j],ptsy[j])
+          //   printf("%4.1f/%4.1f | ",ptsx[j, ptsy[j]]);
+          // }
+          // cout << endl;
 
-          // Add x,y points to the spline
+          // create a spline and add x,y points to it
+          tk::spline s;
           s.set_points(ptsx,ptsy);
 
           // Define the actual x,y points we will use for the planner
@@ -399,15 +430,19 @@ int main() {
           vector<double> next_y_vals;
 
           // Start with all the previous path points from the last time
+          // Re-use path points
           if (previous_path_x.size() > 0){
-            std::cout << "Previous points: " << previous_path_x.size() << ". Example: ";
-            std::cout << previous_path_x[1] << "," << previous_path_y[1] << std::endl;
-          }
-          for(int j = 0; j < previous_path_x.size(); ++j) {
-            next_x_vals.push_back(previous_path_x[j]);
-            next_y_vals.push_back(previous_path_y[j]);
+            std::cout << "Reused points: " << previous_path_x.size() << std::endl;
+            for(int j = 0; j < previous_path_x.size(); j++) {
+              next_x_vals.push_back(previous_path_x[j]);
+              next_y_vals.push_back(previous_path_y[j]);
+            }
           }
 
+
+
+
+          // Add new path points
           // Calculate how to break up spline points so that we travel at desired reference velocity
           double target_x = 30.0;
           double target_y = s(target_x);
@@ -415,21 +450,23 @@ int main() {
           double x_add_on = 0;
 
           // Fill up the rest of our path planner after filling it with previous points. Here,
-          // we will always output 50 points
-          for (int j = 1; j <= 50-previous_path_x.size(); ++j) {
+          // we will always output 50 points. Start point is end of previous path, i.e. future!
+          // for (int j = 1; j <= 50-previous_path_x.size(); j++) {
+          for (int j = 1; j <= 50-previous_path_x.size(); j++) {
             double N = (target_dist/(0.02*ref_v/2.24));  // 2.24: conversion mph to m/s
             double x_point = x_add_on + target_x / N;
-            double y_point = s(x_point);
+            double y_point = s(x_point);  // TODO: speed compensation
 
             x_add_on = x_point;
 
             double x_ref = x_point;
             double y_ref = y_point;
 
+            // TODO: rotation in every step or rather just once for all?
             // Rotate back to normal after rotating it earlier (conversion back to global coord's)
             x_point = (x_ref * cos(ref_yaw) - y_ref*sin(ref_yaw));
-            y_point = (y_ref * sin(ref_yaw) + y_ref*cos(ref_yaw));
-
+            y_point = (x_ref * sin(ref_yaw) + y_ref*cos(ref_yaw));
+            // Translate back to global coordinate system
             x_point += ref_x;
             y_point += ref_y;
 
