@@ -9,16 +9,12 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
 #include "spline.h"     // GPLv2 from https://kluge.in-chemnitz.de/opensource/spline/
+#include "helper_functions.h"
+#include "cost.cpp"
 
 
 using namespace std;
 using json = nlohmann::json;
-
-
-// For converting back and forth between radians and degrees.
-constexpr double pi() { return M_PI; }
-double deg2rad(double x) { return x * pi() / 180; }
-double rad2deg(double x) { return x * 180 / pi(); }
 
 
 // Checks if the SocketIO event has JSON data.
@@ -35,165 +31,6 @@ string hasData(string s) {
   }
   return "";
 }
-
-
-// Calculate distance between two x,y coordinates
-double distance(double x1, double y1, double x2, double y2)
-{
-	return sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1));
-}
-
-
-// Calculate closest waypoint to x,y coordinate
-int ClosestWaypoint(double x, double y, const vector<double> &maps_x, const vector<double> &maps_y)
-{
-	double closestLen = 100000; //large number
-	int closestWaypoint = 0;
-
-	for(int i = 0; i < maps_x.size(); i++)
-	{
-		double map_x = maps_x[i];
-		double map_y = maps_y[i];
-		double dist = distance(x,y,map_x,map_y);
-		if(dist < closestLen)
-		{
-			closestLen = dist;
-			closestWaypoint = i;
-		}
-	}
-	return closestWaypoint;
-}
-
-
-// Provide next waypoint
-int NextWaypoint(double x, double y, double theta, const vector<double> &maps_x, const vector<double> &maps_y)
-{
-	int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
-	double map_x = maps_x[closestWaypoint];
-	double map_y = maps_y[closestWaypoint];
-	double heading = atan2((map_y-y),(map_x-x));
-	double angle = fabs(theta-heading);
-  angle = min(2*pi() - angle, angle);
-  if(angle > pi()/2)
-  {
-    closestWaypoint++;
-    if (closestWaypoint == maps_x.size())
-    {
-      closestWaypoint = 0;
-    }
-  }
-  return closestWaypoint;
-}
-
-
-// Provide next waypoint based on s coordinate
-int PrevWaypoint_s(double s, const vector<double> &maps_s)
-{
-	int prev_wp = -1;
-  // wrap around end of list
-	while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) ))
-	{
-		prev_wp++;
-	}
-  // return value
-	return prev_wp;
-}
-
-
-// Provide next waypoint based on s coordinate
-int NextWaypoint_s(double s, const vector<double> &maps_s)
-{
-	int prev_wp = PrevWaypoint_s(s, maps_s);
-  // calculate next waypoint: wrap-around at end of array
-  int next_wp = (prev_wp+1)%maps_s.size();
-  // return value
-	return next_wp;
-}
-
-
-// Transform from Cartesian x,y coordinates to Frenet s,d coordinates
-vector<double> getFrenet(double x, double y, double theta, const vector<double> &maps_x, const vector<double> &maps_y)
-{
-  // Get previous and next waypoint
-	int next_wp = NextWaypoint(x,y, theta, maps_x,maps_y);
-	int prev_wp;
-	prev_wp = next_wp-1;
-	if(next_wp == 0)
-	{
-		prev_wp  = maps_x.size()-1;
-	}
-  // Prepare variables
-	double n_x = maps_x[next_wp]-maps_x[prev_wp];
-	double n_y = maps_y[next_wp]-maps_y[prev_wp];
-	double x_x = x - maps_x[prev_wp];
-	double x_y = y - maps_y[prev_wp];
-	// find the projection of x onto n
-	double proj_norm = (x_x*n_x+x_y*n_y)/(n_x*n_x+n_y*n_y);
-	double proj_x = proj_norm*n_x;
-	double proj_y = proj_norm*n_y;
-  // calculate Frenet d value (lateral distance)
-	double frenet_d = distance(x_x,x_y,proj_x,proj_y);
-	// correct sign of d value: comparing it to a center point
-	double center_x = 1000-maps_x[prev_wp];
-	double center_y = 2000-maps_y[prev_wp];
-	double centerToPos = distance(center_x,center_y,x_x,x_y);
-	double centerToRef = distance(center_x,center_y,proj_x,proj_y);
-	if(centerToPos <= centerToRef)
-	{
-		frenet_d *= -1;
-	}
-	// calculate Frenet s value
-	double frenet_s = 0;
-	for(int i = 0; i < prev_wp; i++)
-	{
-		frenet_s += distance(maps_x[i],maps_y[i],maps_x[i+1],maps_y[i+1]);
-	}
-	frenet_s += distance(0,0,proj_x,proj_y);
-  // return Frenet s and d values
-	return {frenet_s,frenet_d};
-}
-
-
-// Transform from Frenet s,d coordinates to Cartesian x,y
-vector<double> getXY(double s, double d,
-  tk::spline &s_x, tk::spline &s_y, tk::spline &s_dx, tk::spline &s_dy)
-{
-  // Get interpolated x,y,dx,dy values from spline by referencing s-value
-  double path_x = s_x(s);
-  double path_y = s_y(s);
-  double dx = s_dx(s);
-  double dy = s_dy(s);
-  // Calculate final x,y pair by taking lateral displacement d into account
-  double x = path_x + d*dx;
-  double y = path_y + d*dy;
-	return {x,y};
-}
-
-// // Transform from Frenet s,d coordinates to Cartesian x,y
-// vector<double> getXY(double s, double d, const vector<double> &maps_s, const vector<double> &maps_x, const vector<double> &maps_y)
-// {
-// 	int prev_wp = -1;
-//   // wrap around end of list
-// 	while(s > maps_s[prev_wp+1] && (prev_wp < (int)(maps_s.size()-1) ))
-// 	{
-// 		prev_wp++;
-// 	}
-//   // prepare additional waypoint
-//   int wp2 = (prev_wp+1)%maps_x.size();
-// 	// calculate heading
-// 	double heading = atan2((maps_y[wp2]-maps_y[prev_wp]),(maps_x[wp2]-maps_x[prev_wp]));
-// 	// the x,y,s along the segment
-// 	double seg_s = (s-maps_s[prev_wp]);
-// 	double seg_x = maps_x[prev_wp]+seg_s*cos(heading);
-// 	double seg_y = maps_y[prev_wp]+seg_s*sin(heading);
-//   // perpendicular heading
-// 	double perp_heading = heading-pi()/2;
-//   // calculate final x,y coordinates
-// 	double x = seg_x + d*cos(perp_heading);
-// 	double y = seg_y + d*sin(perp_heading);
-//   // return values
-// 	return {x,y};
-// }
 
 
 // Main function
@@ -265,7 +102,12 @@ int main() {
         string event = j[0].get<string>();
 
         if (event == "telemetry") {
-        	// Parse ego vehicle's localization Data from JSON object j[1]
+
+          // --------------------------------------------------------------
+          // READ IN SIMULATOR DATA
+          // --------------------------------------------------------------
+          // Parse ego vehicle's localization Data from JSON object j[1]
+
         	double ego_x = j[1]["x"];
         	double ego_y = j[1]["y"];
         	double ego_s = j[1]["s"];
@@ -275,21 +117,40 @@ int main() {
         	// Previous path data given to the Planner
         	auto previous_path_x = j[1]["previous_path_x"];
         	auto previous_path_y = j[1]["previous_path_y"];
+          // Determine amount of unprocessed path plan data from previous iteration
+          int prev_size = previous_path_x.size();
         	// Previous path's end s and d values
         	double end_path_s = j[1]["end_path_s"];
         	double end_path_d = j[1]["end_path_d"];
         	// Sensor Fusion Data, a list of all other cars on the same side of the road.
         	auto sensor_fusion = j[1]["sensor_fusion"];
+          vector<double> cars_s, cars_s_delta, cars_d, cars_v, cars_v_delta; // Reset variables
+          cout << "Vehicles:";
+          for(int j = 0; j < sensor_fusion.size(); j++) {
+            double d = sensor_fusion[j][6];
+            double sens_vx = sensor_fusion[j][3];
+            double sens_vy = sensor_fusion[j][4];
+            cars_s.push_back(sensor_fusion[j][5]);
+            cars_s_delta.push_back(cars_s[j] - ego_s);
+            cars_d.push_back(sensor_fusion[j][6]);
+            cars_v.push_back(sqrt(sens_vx*sens_vx + sens_vy*sens_vy));
+            cars_v_delta.push_back(cars_v[j] - ego_speed);
+            printf(" |%2i: d=%3.1f,ds=%5.1f",j,cars_d[j],cars_s[j]-ego_s);
+          }
+          cout << endl;
 
-          int prev_size = previous_path_x.size();
+          // --------------------------------------------------------------
+          // STATE MACHINE: DECIDE WHAT TO DO
+          // --------------------------------------------------------------
 
+          // Detect best lane: check for cars ahead of ego vehicle and their speed
+          // Start with lane 0:
+          vector<double> laneCost = getBestLane(cars_s_delta, cars_d, cars_v_delta);
 
 
           // Sensor fusion input
-          if (prev_size > 0) {
-            // ego_s = end_path_s;
-          }
           bool too_close = false;
+          bool acc_dominant = false;
 
           // find ref_v to use
           for (int j=0; j < sensor_fusion.size(); ++j) {
@@ -304,11 +165,11 @@ int main() {
               // if using previous points can project s value outwards
               check_car_s += ((double)prev_size * 0.02 * check_speed);
               // check s values greater than mine and s gap
-              if ((check_car_s > ego_s) && ((check_car_s - ego_s) < 30) ) {
-                // Do some logic here. Lower reference velocity, so we don't crash into the car
-                // in front of us. Could also flag to try to change lanes.
+              if ((check_car_s > ego_s) && ((check_car_s - ego_s) < 100) ) {
+                // Vehicle is within 100m. Reduce speed to match approaching vehicles speed.
                 // ref_v = 29.5; // mph
                 too_close = true;
+
                 // if (lane > 0) {
                 //   lane = 0;
                 // }
@@ -325,22 +186,17 @@ int main() {
             }
           }
 
-          // double dist_inc = ref_v/2.24*0.02;
-          // for (int j=0; j < 500; j++) {
-          //   double next_s = ego_s + (j+1)*dist_inc;
-          //   vector<double> xy = getXY(next_s,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
-          //   next_x_vals.push_back(xy[0]);
-          //   next_y_vals.push_back(xy[1]);
-          // }
+
+
+          // --------------------------------------------------------------
+          // TRAJECTORY GENERATION: CALCULATE PATH
+          // --------------------------------------------------------------
+
+
 
           // Create list with widely spaced waypoints, approximately 30m
           vector<double> ptsx;
           vector<double> ptsy;
-
-          // // Reference state  // shifted some lines below
-          // double ref_x = ego_x;
-          // double ref_y = ego_y;
-          // double ref_yaw = deg2rad(ego_yaw);
 
           double ref_x = ego_x;
           double ref_y = ego_y;
@@ -431,9 +287,9 @@ int main() {
 
           // Start with all the previous path points from the last time
           // Re-use path points
-          if (previous_path_x.size() > 0){
-            std::cout << "Reused points: " << previous_path_x.size() << std::endl;
-            for(int j = 0; j < previous_path_x.size(); j++) {
+          if (prev_size > 0){
+            std::cout << "Reused points: " << prev_size << std::endl;
+            for(int j = 0; j < prev_size; j++) {
               next_x_vals.push_back(previous_path_x[j]);
               next_y_vals.push_back(previous_path_y[j]);
             }
@@ -451,8 +307,8 @@ int main() {
 
           // Fill up the rest of our path planner after filling it with previous points. Here,
           // we will always output 50 points. Start point is end of previous path, i.e. future!
-          // for (int j = 1; j <= 50-previous_path_x.size(); j++) {
-          for (int j = 1; j <= 50-previous_path_x.size(); j++) {
+          // for (int j = 1; j <= 50-prev_size; j++) {
+          for (int j = 1; j <= 50-prev_size; j++) {
             double N = (target_dist/(0.02*ref_v/2.24));  // 2.24: conversion mph to m/s
             double x_point = x_add_on + target_x / N;
             double y_point = s(x_point);  // TODO: speed compensation
