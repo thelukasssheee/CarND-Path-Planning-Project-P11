@@ -10,7 +10,6 @@
 #include "json.hpp"
 #include "spline.h"     // GPLv2 from https://kluge.in-chemnitz.de/opensource/spline/
 #include "helper_functions.h"
-#include "cost.cpp"
 
 
 using namespace std;
@@ -80,6 +79,10 @@ int main() {
 
   // Start in center lane (lane 1)
   int lane = 1;
+  int lane_target = 1;
+  int lane_best = 1;
+  // Define current state
+  char state = "STAY";
 
   // Reference velocity
   // double ref_v = 49.6; //mph
@@ -113,7 +116,7 @@ int main() {
         	double ego_s = j[1]["s"];
         	double ego_d = j[1]["d"];
         	double ego_yaw = j[1]["yaw"];
-        	double ego_speed = j[1]["speed"];
+        	double ego_v = j[1]["speed"];
         	// Previous path data given to the Planner
         	auto previous_path_x = j[1]["previous_path_x"];
         	auto previous_path_y = j[1]["previous_path_y"];
@@ -125,7 +128,7 @@ int main() {
         	// Sensor Fusion Data, a list of all other cars on the same side of the road.
         	auto sensor_fusion = j[1]["sensor_fusion"];
           vector<double> cars_s, cars_s_delta, cars_d, cars_v, cars_v_delta; // Reset variables
-          cout << "Vehicles:";
+          // cout << "Vehicles:";
           for(int j = 0; j < sensor_fusion.size(); j++) {
             double d = sensor_fusion[j][6];
             double sens_vx = sensor_fusion[j][3];
@@ -134,21 +137,53 @@ int main() {
             cars_s_delta.push_back(cars_s[j] - ego_s);
             cars_d.push_back(sensor_fusion[j][6]);
             cars_v.push_back(sqrt(sens_vx*sens_vx + sens_vy*sens_vy));
-            cars_v_delta.push_back(cars_v[j] - ego_speed);
-            printf(" |%2i: d=%3.1f,ds=%5.1f",j,cars_d[j],cars_s[j]-ego_s);
+            cars_v_delta.push_back(cars_v[j] - ego_v);
+            // printf(" |%2i: d=%3.1f,ds=%5.1f",j,cars_d[j],cars_s[j]-ego_s);
           }
           cout << endl;
 
-          // --------------------------------------------------------------
-          // STATE MACHINE: DECIDE WHAT TO DO
-          // --------------------------------------------------------------
 
-          // Detect best lane: check for cars ahead of ego vehicle and their speed
-          // Start with lane 0:
+          // --------------------------------------------------------------
+          // STATE MACHINE & BEST LANE DETECTION
+          // --------------------------------------------------------------
+          // Detect best lane: check for cars ahead of ego vehicle and their speed in each lane
           vector<double> laneCost = getBestLane(cars_s_delta, cars_d, cars_v_delta);
+          int max_indx = std::max_element(laneCost.begin(),laneCost.end())-laneCost.begin();
+          if (max_indx != lane) {
+            lane_best = max_indx;
+          }
+          // Check if lane change is feasible. If not, "STAY"
+          vector<bool> laneFeasibility = getLaneFeasibility(cars_s_delta, cars_d, cars_v_delta);
+          // Apply logic: only one lane may be changed at a time. Lane needs to be empty beforehand.
+          if (lane_best != lane) {
+            if (lane_best > lane) {
+              if (laneFeasibility[lane + 1]) {
+                state = "LCR";
+                lane_target = lane + 1;
+              } else {
+                state = "LCR-P";
+                lane_target = lane;
+              }
+            } else if (lane_best < lane) {
+              if (laneFeasibility[lane - 1]) {
+                state = "LCL";
+                lane_target = lane - 1;
+              } else {
+                state = "LCL-P";
+                lane_target = lane;
+              }
+            } else {
+              state = "STAY";
+              lane_target = lane;
+            }
+          }
+          cout << "Curr lane = " << lane << ". System state '" << state;
+          cout << "' with target lane " << lane_target << endl;
 
 
-          // Sensor fusion input
+          // --------------------------------------------------------------
+          // VEHICLE SPEED CONTROLLER: SET REFERENCE SPEED TRAFFIC DEPENDENT
+          // --------------------------------------------------------------
           bool too_close = false;
           bool acc_dominant = false;
 
@@ -157,46 +192,67 @@ int main() {
             // car is in my lane
             float d = sensor_fusion[j][6];
             if (d < (2+4*lane + 2) && d > (2+4*lane - 2)) {
-              double vx = sensor_fusion[j][3];
-              double vy = sensor_fusion[j][4];
-              double check_speed = sqrt(vx*vx + vy*vy);
-              double check_car_s = sensor_fusion[j][5];
-
-              // if using previous points can project s value outwards
-              check_car_s += ((double)prev_size * 0.02 * check_speed);
-              // check s values greater than mine and s gap
-              if ((check_car_s > ego_s) && ((check_car_s - ego_s) < 100) ) {
-                // Vehicle is within 100m. Reduce speed to match approaching vehicles speed.
-                // ref_v = 29.5; // mph
-                too_close = true;
-
-                // if (lane > 0) {
-                //   lane = 0;
-                // }
+              double car_s = sensor_fusion[j][5];
+              // only look at vehicles ahead of ego vehicle and within a certain distance
+              if ((car_s > ego_s) && ((car_s - ego_s) < 50) ) {
+                // Predict other vehicle position and speed
+                double car_vx = sensor_fusion[j][3];
+                double car_vy = sensor_fusion[j][4];
+                double car_v = sqrt(car_vx*car_vx + car_vy*car_vy);
+                double car_s_proj = car_s + ((double)prev_size * 0.02 * car_v/2.24);
+                // Predict ego position and speed
+                double ego_s_proj = end_path_s; // last point of previous points array
+                // If vehicle is within ACC dominant distance range, adapt vehicle speed
+                double delta_s_proj = car_s_proj - ego_s_proj;
+                double delta_s_dot = delta_s_proj - (car_s - ego_s);
+                double safety_dist = ego_v/2.24; // conversion to mph = x/2.24, t = x*2s --> 1.12
+                // Vehicle within safety distance
+                if (delta_s_proj < safety_dist) {
+                  too_close = true;
+                  acc_dominant = true;
+                  if (delta_s_dot > 0) {
+                    // Within safety distance, but distance increasing:
+                    // Increase speed until ego is almost car speed to achieve target distance
+                    ref_v = min((ref_v + 0.224*2), car_v * 0.95);
+                    cout << "Case 1:";
+                  } else {
+                    // Within safety distance and distance is further decreasing:
+                    // Reduce speed drastically
+                    ref_v -= 0.224;
+                    cout << "Case 2:";
+                  }
+                } else if (delta_s_proj >= safety_dist){
+                  if (delta_s_dot > 0) {
+                    acc_dominant = true;
+                    // Outside safety distance and distance is further increasing (vehicle too slow)
+                    // Increase speed so that ego is slightly faster than other car
+                    ref_v = min((ref_v + 0.224*2), car_v * 1.05);
+                    cout << "Case 3:";
+                  } else {
+                    // Outside safety distance, but distance further decreasing
+                    // Do nothing, continue approaching the car
+                    cout << "Case 4:";
+                  }
+                }
+                cout << " delta_s: " << car_s - ego_s << " delta_s_proj: " << delta_s_proj << " , delta_s_dot: " << delta_s_dot << endl;
               }
             }
           }
 
-          if (too_close) {
-            ref_v -= 0.224;
-          }
-          else {
-            if (ref_v < 49.5) {
-              ref_v += 0.224;
-            }
-          }
 
+          // No vehicle ahead: accelerate to full speed
+          if ((too_close == false) && (acc_dominant == false)) {
+            ref_v = min(49.5, ref_v + 0.224*2);
+            cout << "Case 0" << endl;
+          }
 
 
           // --------------------------------------------------------------
           // TRAJECTORY GENERATION: CALCULATE PATH
           // --------------------------------------------------------------
 
-
-
           // Create list with widely spaced waypoints, approximately 30m
-          vector<double> ptsx;
-          vector<double> ptsy;
+          vector<pair<double,double>> spline_pts;
 
           double ref_x = ego_x;
           double ref_y = ego_y;
@@ -204,18 +260,13 @@ int main() {
           double ref_d = ego_d;
           double ref_yaw = deg2rad(ego_yaw);
           // If previous size is almost empty, use ego as starting reference
-          if(prev_size < 2) {
+          if (prev_size < 3) {
             // Use current position and yaw angle to calculate tangent to car
             double ref_x_prev = ego_x - cos(ref_yaw);
             double ref_y_prev = ego_y - sin(ref_yaw);
-
-            ptsx.push_back(ref_x_prev);
-            ptsx.push_back(ref_x);
-            ptsy.push_back(ref_y_prev);
-            ptsy.push_back(ref_y);
-            // double ref_x = ego_x;
-            // double ref_y = ego_y;
-            // double ref_yaw = deg2rad(ego_yaw);
+            spline_pts.push_back(make_pair(ref_x_prev, ref_y_prev));
+            spline_pts.push_back(make_pair(ref_x,      ref_y));
+            cout << "Fallback path calculation: not enough previous waypoints. " << endl;
           }
           // Enough previous points are available. Generate reference from last two points of path
           else {
@@ -230,56 +281,54 @@ int main() {
             // Calculate yaw based on these two points
             ref_yaw = atan2(ref_y-ref_y_prev, ref_x-ref_x_prev);
             // Use last two points to make the path tangent to the previous path's end point
-            ptsx.push_back(ref_x_prev);
-            ptsx.push_back(ref_x);
-            ptsy.push_back(ref_y_prev);
-            ptsy.push_back(ref_y);
-            // cout << "Previous x,y: " << ref_x_prev << "," << ref_y_prev << ". ";
-            // cout << "Current x,y: " << ref_x << "," << ref_y << "." << endl;
+            spline_pts.push_back(make_pair(ref_x_prev, ref_y_prev));
+            spline_pts.push_back(make_pair(ref_x,      ref_y));
           }
           printf("Ego/ref yaw: %6.2f/%6.2f\n", deg2rad(ego_yaw), ref_yaw);
           printf("Ego s/d: %6.1f/%5.2f\n", ego_s, ego_d);
           printf("Ref s/d: %6.1f/%5.2f\n", ref_s, ref_d);
+          printf("End s/d: %6.1f/%5.2f\n", end_path_s, end_path_d);
 
-          // In Frenet add evenly 30m spaced points ahead of the starting reference
+          // In Frenet add evenly 30m spaced points ahead of the starting reference, but dependent
+          // on target lane and current lane
+
           vector<double> next_wp0 = getXY(ref_s+ 30,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
           vector<double> next_wp1 = getXY(ref_s+ 60,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
           vector<double> next_wp2 = getXY(ref_s+ 90,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
-          // vector<double> next_wp0 = getXY(ego_s+ 30,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
-          // vector<double> next_wp1 = getXY(ego_s+ 60,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
-          // vector<double> next_wp2 = getXY(ego_s+ 90,(2+4*lane),map_s_x,map_s_y,map_s_dx,map_s_dy);
-          ptsx.push_back(next_wp0[0]);
-          ptsx.push_back(next_wp1[0]);
-          ptsx.push_back(next_wp2[0]);
-          ptsy.push_back(next_wp0[1]);
-          ptsy.push_back(next_wp1[1]);
-          ptsy.push_back(next_wp2[1]);
+          spline_pts.push_back(make_pair(next_wp0[0], next_wp0[1]));
+          spline_pts.push_back(make_pair(next_wp1[0], next_wp1[1]));
+          spline_pts.push_back(make_pair(next_wp2[0], next_wp2[1]));
 
           // Transform spline's base/reference points to car coordinate system
-          for (int j = 0; j < ptsx.size(); ++j ) {
+          // for (int j = 0; j < ptsx.size(); ++j ) {
+          for (int j = 0; j < spline_pts.size(); ++j ) {
             // Transform to car coordinate system (subtract ref x,y global position)
-            double shift_x = ptsx[j] - ref_x;   // Ref x,y is at end of previous path (i.e. future)
-            double shift_y = ptsy[j] - ref_y;
+            double shift_x = spline_pts[j].first - ref_x;   // Ref x,y is at end of previous path (i.e. future)
+            double shift_y = spline_pts[j].second - ref_y;
             // Shift car reference angle to 0 degrees
-            ptsx[j] = (shift_x * cos(0-ref_yaw) - shift_y*sin(0-ref_yaw));
-            ptsy[j] = (shift_x * sin(0-ref_yaw) + shift_y*cos(0-ref_yaw));
+            spline_pts[j].first = (shift_x * cos(0-ref_yaw) - shift_y*sin(0-ref_yaw));
+            spline_pts[j].second = (shift_x * sin(0-ref_yaw) + shift_y*cos(0-ref_yaw));
+          }
+          // Make sure that first two spline points are adjacent to each other
+          if ((spline_pts[1].first - spline_pts[0].first) < 0.001) {
+            spline_pts[0].first -= 1.;
           }
 
+          // Sort points in ascending order to prevent crash due to signal noise at low ego speeds
+          sort(spline_pts.begin(),spline_pts.end());
+          // Prepare spline x,y arrays and output values
           cout << "Spline x,y: ";
-          for (int j = 0; j < ptsx.size(); ++j ) {
-            printf("%4.1f/%4.1f | ", ptsx[j], ptsy[j]);
+          vector<double> spline_xpts(spline_pts.size()), spline_ypts(spline_pts.size());
+          for (int j = 0; j < spline_pts.size(); ++j ) {
+            spline_xpts[j] = spline_pts[j].first;
+            spline_ypts[j] = spline_pts[j].second;
+            printf("%4.1f/%4.1f | ", spline_pts[j].first, spline_pts[j].second);
           }
           cout << endl;
-          // cout << "Spline s,d: ";
-          // for (int j = 0; j < ptsx.size(); ++j ) {
-          //   vector<double> sdconv = getFrenet(ptsx[j],ptsy[j])
-          //   printf("%4.1f/%4.1f | ",ptsx[j, ptsy[j]]);
-          // }
-          // cout << endl;
 
-          // create a spline and add x,y points to it
+          // Create a spline and add x,y points to it
           tk::spline s;
-          s.set_points(ptsx,ptsy);
+          s.set_points(spline_xpts,spline_ypts);
 
           // Define the actual x,y points we will use for the planner
           vector<double> next_x_vals;

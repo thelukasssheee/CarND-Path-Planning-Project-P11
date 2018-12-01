@@ -178,6 +178,7 @@ vector<double> getXY(double s, double d,
 }
 
 
+
 // Calculate optimal lane line to pick
 vector<double> getBestLane(vector<double>& cars_s_d, vector<double>& cars_d, vector<double>& cars_v_d)
 {
@@ -186,7 +187,7 @@ vector<double> getBestLane(vector<double>& cars_s_d, vector<double>& cars_d, vec
   int best_lane = 0;
   double best_score = -9999.;
   for (int j=0; j<3; j++){
-    lane_score.push_back(999.);
+    lane_score.push_back(10000.);
   }
   if (cars_s_d.size() > 0) {
     double horizon_max = 120.; // meters
@@ -207,7 +208,8 @@ vector<double> getBestLane(vector<double>& cars_s_d, vector<double>& cars_d, vec
             // behind score higher. Highest score is achieved for an empty lane within horizon.
             double dv = cars_v_d[j];
             double ds = cars_s_d[j];
-            double score = 0.06*sqrt(abs(ds-signum(dv)*10))*dv*(ds-signum(dv)*10);
+            double score = 0.1*ds+0.8*dv*signum(ds)-1000*exp(-0.04*ds*ds);
+            // double score = 0.06*sqrt(abs(ds-signum(dv)*10))*dv*(ds-signum(dv)*10);
             // Reduce score to lowest value within lane
             lane_score[lane] = min(lane_score[lane],score);
           }
@@ -228,15 +230,73 @@ vector<double> getBestLane(vector<double>& cars_s_d, vector<double>& cars_d, vec
       }
     }
   }
-  cout << "Best lane = " << best_lane << " with score " << best_score << endl;
+  cout << "Best lane = " << best_lane << " with score " << best_score << ". " << endl;
   return lane_score;
 }
 
-/*
-cars_s.push_back(sensor_fusion[j][5]);
-cars_s_delta.push_back(sensor_fusion[j][5]-ego_s);
-cars_d.push_back(sensor_fusion[j][6]);
-cars_v.p
-*/
+// Calculate optimal lane line to pick
+vector<bool> getLaneFeasibility(vector<double>& cars_s_d, vector<double>& cars_d, vector<double>& cars_v_d)
+{
+  // Initialize lane score with a high number
+  vector<double> lane_score;
+  int best_lane = 0;
+  double best_score = -9999.;
+  for (int j=0; j<3; j++){
+    lane_score.push_back(10000.);
+  }
+  if (cars_s_d.size() > 0) {
+    double horizon_max =  20.; // meters
+    double horizon_min = -20.; // meters
+
+    // Loop through all cars
+    for(int j = 0; j < cars_s_d.size(); j++) {
+      // Check if vehicle is within horizon
+      if ((cars_s_d[j] < horizon_max) && (cars_s_d[j] > horizon_min)) {
+        // Check which lane the vehicle is within
+        for (int lane = 0; lane < 3; lane++) {
+          // Is vehicle within current lane? If not, move on.
+          if ((cars_d[j] > lane*4) && (cars_d[j] <= (lane+1)*4)) {
+            // Calculate score. Optimization took place with www.desmos.com, see hyperlink
+            // https://www.desmos.com/calculator/zqxwm2lmyl - Formula j(x,v)
+            // Formula is rather complicated, but makes sure, that slower vehicles ahead and faster
+            // vehicles behind get punished. Vice versa, faster vehicles ahead and slower vehicles
+            // behind score higher. Highest score is achieved for an empty lane within horizon.
+            double dv = cars_v_d[j];
+            double ds = cars_s_d[j];
+            double score = 0.1*ds+0.8*dv*signum(ds)-1000*exp(-0.04*ds*ds);
+            // double score = 0.06*sqrt(abs(ds-signum(dv)*10))*dv*(ds-signum(dv)*10);
+            // Reduce score to lowest value within lane
+            lane_score[lane] = min(lane_score[lane],score);
+          }
+        }
+      }
+    // }
+    // for (int lane = 0; lane < 3; lane++) {
+    //   cout << "Lane " << lane << ": ";
+    //   for (int j = 0; j < cars_s_d.size(); j++) {
+    //     if ((cars_d[j] > lane*4) && (cars_d[j] <= (lane+1)*4)) {
+    //       printf(" | %i: dv=%2.0f,ds=%4.0f",j,cars_v_d[j],cars_s_d[j]);
+    //     }
+    //   }
+    //   cout << " || Lane score = " << lane_score[lane] << endl;
+    //   if (lane_score[lane] > best_score) {
+    //     best_score = lane_score[lane];
+    //     best_lane = lane;
+    //   }
+    // }
+  }
+
+  vector<bool> lane_feasibility(3);
+  for (int lane = 0; lane < 3; lane++) {
+    if (lane_score[lane] > 0) {
+      lane_feasibility[lane] = true;
+    }
+    else {
+      lane_feasibility[lane] = false;
+    }
+  }
+  // cout << "Best lane = " << best_lane << " with score " << best_score << endl;
+  return lane_feasibility;
+}
 
 #endif /* HELPER_FUNCTIONS_H_ */
