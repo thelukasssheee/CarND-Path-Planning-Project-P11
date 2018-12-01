@@ -4,4 +4,4 @@ tags
 .editorconfig
 .DS_Store
 backup
-.gch
+*.gch

@@ -270,7 +270,7 @@ vector<bool> getLaneFeasibility(vector<double>& cars_s_d, vector<double>& cars_d
           }
         }
       }
-    // }
+    }
     // for (int lane = 0; lane < 3; lane++) {
     //   cout << "Lane " << lane << ": ";
     //   for (int j = 0; j < cars_s_d.size(); j++) {

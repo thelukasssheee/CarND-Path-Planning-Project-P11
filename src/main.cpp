@@ -82,13 +82,13 @@ int main() {
   int lane_target = 1;
   int lane_best = 1;
   // Define current state
-  char state = "STAY";
+  string state = "STAY";
 
   // Reference velocity
   // double ref_v = 49.6; //mph
   double ref_v = 0.0; //mph
 
-  h.onMessage([&map_s_x,&map_s_y,&map_s_dx,&map_s_dy,&ref_v,&lane]
+  h.onMessage([&map_s_x,&map_s_y,&map_s_dx,&map_s_dy,&ref_v,&lane,&lane_target,&lane_best,&state]
     (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
