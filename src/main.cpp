@@ -10,6 +10,7 @@
 #include "json.hpp"
 #include "spline.h"     // GPLv2 from https://kluge.in-chemnitz.de/opensource/spline/
 #include "helper_functions.h"
+#include "state_machine.h"
 
 
 using namespace std;
