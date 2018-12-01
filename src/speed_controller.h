@@ -48,7 +48,7 @@ void speed_controller(vector<double> &cars_s,vector<double> &cars_s_delta,vector
           } else {
             // Within safety distance and distance is further decreasing:
             // Reduce speed drastically
-            ref_v -= 0.224;
+            ref_v -= 0.224*3;
             cout << "Case 2:";
           }
         } else if (delta_s_proj >= safety_dist){
