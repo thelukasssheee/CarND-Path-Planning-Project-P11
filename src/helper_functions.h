@@ -36,15 +36,16 @@ constexpr double pi() {
 double deg2rad(double x) {
   return x * pi() / 180;
 }
-
 double rad2deg(double x) {
   return x * 180 / pi();
 }
+
 
 // Signum function
 template <typename T> int signum(T val) {
     return (T(0) < val) - (val < T(0));
 }
+
 
 // Calculate distance between two x,y coordinates
 double distance(double x1, double y1, double x2, double y2)
@@ -179,7 +180,6 @@ vector<double> getXY(double s, double d,
 }
 
 
-
 // Calculate optimal lane line to pick
 vector<double> getBestLane(vector<double>& cars_s_d, vector<double>& cars_d, vector<double>& cars_v_d)
 {
@@ -236,6 +236,7 @@ vector<double> getBestLane(vector<double>& cars_s_d, vector<double>& cars_d, vec
   return lane_score;
 }
 
+
 // Calculate optimal lane line to pick
 vector<bool> getLaneFeasibility(vector<double>& cars_s_d, vector<double>& cars_d, vector<double>& cars_v_d)
 {
@@ -276,7 +277,7 @@ vector<bool> getLaneFeasibility(vector<double>& cars_s_d, vector<double>& cars_d
       }
     }
   }
-
+  // Create boolean output vector
   vector<bool> lane_feasibility(3);
   for (int lane = 0; lane < 3; lane++) {
     if (lane_score[lane] > 0) {

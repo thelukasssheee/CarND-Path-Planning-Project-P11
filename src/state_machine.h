@@ -90,4 +90,4 @@ void State_Machine(string &state, int &lane, int &lane_target, int &lane_best, d
   }
 }
 
-#endif /* HELPER_FUNCTIONS_H_ */
+#endif /* STATE_MACHINE_H */
