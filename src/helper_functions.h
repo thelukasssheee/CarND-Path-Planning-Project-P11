@@ -12,6 +12,7 @@
 #include <fstream>
 #include <vector>
 #include <iostream>
+#include <string>
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
@@ -190,7 +191,7 @@ vector<double> getBestLane(vector<double>& cars_s_d, vector<double>& cars_d, vec
     lane_score.push_back(10000.);
   }
   if (cars_s_d.size() > 0) {
-    double horizon_max = 120.; // meters
+    double horizon_max = 150.; // meters
     double horizon_min = -20.; // meters
 
     // Loop through all cars
@@ -208,8 +209,10 @@ vector<double> getBestLane(vector<double>& cars_s_d, vector<double>& cars_d, vec
             // behind score higher. Highest score is achieved for an empty lane within horizon.
             double dv = cars_v_d[j];
             double ds = cars_s_d[j];
+            // double score = a * ds + b * dv*signum(ds) + c * exp(d * ds*ds);
             double score = 0.1*ds+0.8*dv*signum(ds)-1000*exp(-0.04*ds*ds);
-            // double score = 0.06*sqrt(abs(ds-signum(dv)*10))*dv*(ds-signum(dv)*10);
+            // Add offset for vehicles behind (negative delta_s values)
+            if (ds < 0) { score += 7.; }  // variable e_0 in desmos
             // Reduce score to lowest value within lane
             lane_score[lane] = min(lane_score[lane],score);
           }
@@ -230,7 +233,6 @@ vector<double> getBestLane(vector<double>& cars_s_d, vector<double>& cars_d, vec
       }
     }
   }
-  cout << "Best lane = " << best_lane << " with score " << best_score << ". " << endl;
   return lane_score;
 }
 
@@ -245,7 +247,7 @@ vector<bool> getLaneFeasibility(vector<double>& cars_s_d, vector<double>& cars_d
     lane_score.push_back(10000.);
   }
   if (cars_s_d.size() > 0) {
-    double horizon_max =  20.; // meters
+    double horizon_max =  40.; // meters
     double horizon_min = -20.; // meters
 
     // Loop through all cars
@@ -257,33 +259,22 @@ vector<bool> getLaneFeasibility(vector<double>& cars_s_d, vector<double>& cars_d
           // Is vehicle within current lane? If not, move on.
           if ((cars_d[j] > lane*4) && (cars_d[j] <= (lane+1)*4)) {
             // Calculate score. Optimization took place with www.desmos.com, see hyperlink
-            // https://www.desmos.com/calculator/zqxwm2lmyl - Formula j(x,v)
+            // https://www.desmos.com/calculator/7qhdrupbli - Formula j(x,v)
             // Formula is rather complicated, but makes sure, that slower vehicles ahead and faster
             // vehicles behind get punished. Vice versa, faster vehicles ahead and slower vehicles
             // behind score higher. Highest score is achieved for an empty lane within horizon.
             double dv = cars_v_d[j];
             double ds = cars_s_d[j];
-            double score = 0.1*ds+0.8*dv*signum(ds)-1000*exp(-0.04*ds*ds);
-            // double score = 0.06*sqrt(abs(ds-signum(dv)*10))*dv*(ds-signum(dv)*10);
+            // double score = a * ds + b * dv*signum(ds) + c * exp(d * ds*ds);
+            double score = 0.15*ds+0.5*dv*signum(ds)-1000*exp(-0.04*ds*ds);
+            // Add offset for vehicles behind (negative delta_s values)
+            if (ds < 0) { score += 7.; }  // variable e_0 in desmos
             // Reduce score to lowest value within lane
             lane_score[lane] = min(lane_score[lane],score);
           }
         }
       }
     }
-    // for (int lane = 0; lane < 3; lane++) {
-    //   cout << "Lane " << lane << ": ";
-    //   for (int j = 0; j < cars_s_d.size(); j++) {
-    //     if ((cars_d[j] > lane*4) && (cars_d[j] <= (lane+1)*4)) {
-    //       printf(" | %i: dv=%2.0f,ds=%4.0f",j,cars_v_d[j],cars_s_d[j]);
-    //     }
-    //   }
-    //   cout << " || Lane score = " << lane_score[lane] << endl;
-    //   if (lane_score[lane] > best_score) {
-    //     best_score = lane_score[lane];
-    //     best_lane = lane;
-    //   }
-    // }
   }
 
   vector<bool> lane_feasibility(3);
@@ -295,8 +286,87 @@ vector<bool> getLaneFeasibility(vector<double>& cars_s_d, vector<double>& cars_d
       lane_feasibility[lane] = false;
     }
   }
-  // cout << "Best lane = " << best_lane << " with score " << best_score << endl;
   return lane_feasibility;
 }
+
+
+
+void State_Machine(string &state, int &lane, int &lane_target, int &lane_best, double &ego_v,
+                    vector<double> &laneScore, vector<bool> &laneFeasibility, double &ego_d,
+                    bool &init) {
+  if (state == "STAY") {
+    // Check if better lane than current one is available & speed is high enough
+    if ((lane_best > lane) && (init == false)) {
+      state = "LCR-P";
+    } else if (lane_best < lane) {
+      state = "LCL-P";
+    } else {
+      lane_target = lane;
+      state = "STAY";
+    }
+  }
+  else if (state == "LCL-P") {
+    // Check if best lane assumption left-hand-side to current lane is still valid
+    if (lane_best < lane) {
+      // Check if lane change is feasible. If not, stay with lane change preparation
+      if (laneFeasibility[lane - 1]) {
+        lane_target = lane - 1;
+        state = "LCL";
+      } else {
+        lane_target = lane;
+        state = "LCL-P";
+      }
+    // Lane change left is not anymore best option
+    } else {
+      lane_target = lane;
+      state = "STAY";
+    }
+  }
+  else if (state == "LCL") {
+    // Lane change left is going to happen and stays until finished.
+    // Check if lane change is finished
+    if ( abs(ego_d - (2+lane_target*4)) < 0.3 ) {
+      lane = lane_target;
+      state = "STAY";
+    } else {
+      int a = 1;
+    }
+  }
+  else if (state == "LCR-P") {
+    // Check if best lane assumption right-hand-side to current lane is still valid
+    if (lane_best > lane) {
+      // Check if lane change is feasible. If not, stay with lane change preparation
+      if (laneFeasibility[lane + 1]) {
+        lane_target = lane + 1;
+        state = "LCR";
+      } else {
+        lane_target = lane;
+        state = "LCR-P";
+      }
+    // Lane change right is not anymore best option
+    } else {
+      lane_target = lane;
+      state = "STAY";
+    }
+  }
+  else if (state == "LCR") {
+    // Lane change right is going to happen and stays until finished.
+    // Check if lane change is finished
+    double target_d = 2+lane_target*4.;
+    if (lane_target == 2) {
+      target_d -= 0.2;
+    }
+    if ( abs(ego_d - target_d) < 0.2 ) {
+      lane = lane_target;
+      state = "STAY";
+    } else {
+      int a = 1;
+    }
+  }
+  else {
+    cout << "Something went wrong with the state machine...!!" << endl;
+  }
+}
+
 
 #endif /* HELPER_FUNCTIONS_H_ */
