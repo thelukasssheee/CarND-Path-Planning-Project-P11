@@ -203,7 +203,7 @@ vector<double> getBestLane(vector<double>& cars_s_d, vector<double>& cars_d, vec
           // Is vehicle within current lane? If not, move on.
           if ((cars_d[j] > lane*4) && (cars_d[j] <= (lane+1)*4)) {
             // Calculate score. Optimization took place with www.desmos.com, see hyperlink
-            // https://www.desmos.com/calculator/zqxwm2lmyl - Formula j(x,v)
+            // https://www.desmos.com/calculator/7qhdrupbli - Formula j(x,v)
             // Formula is rather complicated, but makes sure, that slower vehicles ahead and faster
             // vehicles behind get punished. Vice versa, faster vehicles ahead and slower vehicles
             // behind score higher. Highest score is achieved for an empty lane within horizon.
