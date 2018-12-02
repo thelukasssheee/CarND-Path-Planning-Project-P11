@@ -1,14 +1,85 @@
 # CarND-Path-Planning-Project
 Self-Driving Car Engineer Nanodegree Program
 
+## Project summary / write-up
+by Michael Berner, Student @ Udacity, March 2018 class
 
-https://www.desmos.com/calculator/jpkv6wdmw4
+[![Udacity - Self-Driving Car NanoDegree](https://s3.amazonaws.com/udacity-sdc/github/shield-carnd.svg)](http://www.udacity.com/drive)
 
-https://www.desmos.com/calculator/z8btlutkjc
 
-https://www.desmos.com/calculator/zqxwm2lmyl
+---
 
-https://www.desmos.com/calculator/2fuobtiepk
+### Overview
+The task in this project was to create a path planning algorithm, which is capable to drive a vehicle around a highway-like track within a simulator. 
+
+[![Project 11 - Path Planning, Overview](./media/intro_overview.png)](./media/intro_overview.png)
+
+Most important topics, which needed to be addressed:
+
+- Collision-free drive
+- Steer and drive vehicle without exceeding acceleration and jerk limitations
+- Lane-change, if a faster lane is available
+
+A complete list of topics to solve can be found in Udacity's [project rubric](https://review.udacity.com/#!/rubrics/1971/view) and below.
+
+### Solution
+
+The project was solved with the following main features:
+
+- Implementation of a State Machine
+- Splines to calculate the trajectory (path planning) 
+- Interpolation of map data
+- Cost function to identify best lanes
+- Cost function to detect lane occupation 
+- Speed controller /w Adaptive cruise control
+
+### Code structure
+
+| ```./src/main.cpp``` | Main script |
+| ```./src/speed_controller.h``` | ACC speed controller |
+| ```./src/spline.h``` | Spline library from Tino Kluge (C), GNU GPL |
+| ```./src/state_machine.h``` | State machine with states "STAY", "Lane Change left" etc. |
+
+### Algorithm
+
+The path planning algorithm in ```main.cpp``` is working in the following logic / order:
+
+**1. Initialization phase**: All sensor signals from the simulator are being read in. Until vehicle has exceeded a first time 40mph, lane change is prohibited using an init flag (see lines until 156).
+  
+**2. Lane selection**: At first, two important inputs are being calculated. Which lane is the best in terms of being not jammed or fastest (line 169 in ```main.cpp``` & ```helper_functions.h``` line 184). Additionally, it is important to know which lanes are currently safe to drive on. This happens in line 174 (```main.cpp```) and line 241 (```helper_functions.h```). 
+
+**3. State machine:** Based on these inputs, the state machine decides which are the next actions to take (e.g. prepare a lane change, stay in lane etc.). 
+
+**4. Vehicle speed controller**: Vehicle speed is being adjusted with the speed controller. It is reacting on vehicles ahead, which are driving slower either on the current lane or target lane (in case of a planned lane change). Speed is reduced / increased and a safe distance is maintained.
+
+**5. Trajectory generation**: Using splines and several inputs from the preceding functions, the trajectory is being calculated. It is tuned in such a way, that acceleration and jerk limitations are not violated. Pipeline size is 50 datapoints, which are processed by the simulator with a frequency of 50Hz (20ms / datapoint). This means the next second will always be provided to the simulator to compensate lag and generate a smoother trajectory.  
+
+### Lane selection / cost functions
+
+It took quite some time to find the ideal score function, which allows fast & safe travel of the vehicle. 
+
+I considered three aspects for each lane: at what distance and speed compared to the ego vehicle are other vehicles. Closer vehicles are more dangerous. Vehicles ahead with much slower speeds are also dangerous. Vehicles behind, which are driving slower, are not issue at all. 
+
+An extremely helpful browser based tool was the [Desmos Graphing Calculator](https://www.desmos.com/calculator).
+
+Below, one of the applied score/cost functions is visualized.
+
+[![Score function - visualized with Desmos graphic calculator](./media/cost_function.png)](./media/cost_function.png)
+
+The x axis shows distance to other vehicles (always measured ```other car - ego vehicle```, thus: positive x values means other vehicles are ahead). The vertical axis shows the score, with higher values expressing favorable lanes. 
+
+Within a horizon of [-20m...+150m], **all** vehicles are being assessed for each lane. If multiple vehicles are within one lane, the car scoring lowest is used for evaluation (see line 217 in ```helper_functions.h```) since the slowest vehicle might have an impact on the other cars of its lane in the near future.  
+
+### Finite state machine 
+
+During the course of this project, I noticed quickly that behavior planning can become incredibely messy rather quickly. With all the negative consequences, such as unexpected behavior as the most important one. Therefore, a state machine similar to the one from the Udacity lesson was implemented.  
+
+[![Finite State Machine - from Udacity course material](./media/finite_state_machine.png)](./media/finite_state_machine.png)
+
+This was extremely helpful to make sure, that lane changes are actually executed when it is safe and until they are completely finished. All the code is stored in a separate helper function ```state_machine.h```. With less than 100 lines of code, a clear and structured vehicle behavior was achievable within this project.  
+
+# Original Readme by Udacity
+
    
 ### Simulator.
 You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).
