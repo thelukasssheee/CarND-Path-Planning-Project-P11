@@ -6,7 +6,6 @@ by Michael Berner, Student @ Udacity, March 2018 class
 
 [![Udacity - Self-Driving Car NanoDegree](https://s3.amazonaws.com/udacity-sdc/github/shield-carnd.svg)](http://www.udacity.com/drive)
 
-
 ---
 
 ### Overview
@@ -32,6 +31,8 @@ The project was solved with the following main features:
 - Cost function to identify best lanes
 - Cost function to detect lane occupation 
 - Speed controller /w Adaptive cruise control
+
+I created a [Youtube video](https://youtu.be/p9Mxwi5ICnw) of my solution, as well. 
 
 ### Code structure
 
@@ -68,7 +69,9 @@ Below, one of the applied score/cost functions is visualized.
 
 The x axis shows distance to other vehicles (always measured ```other car - ego vehicle```, thus: positive x values means other vehicles are ahead). The vertical axis shows the score, with higher values expressing favorable lanes. 
 
-Within a horizon of [-20m...+150m], **all** vehicles are being assessed for each lane. If multiple vehicles are within one lane, the car scoring lowest is used for evaluation (see line 217 in ```helper_functions.h```) since the slowest vehicle might have an impact on the other cars of its lane in the near future.  
+Within a horizon of [-20m...+150m], **all** vehicles are being assessed for each lane. If multiple vehicles are within one lane, the car scoring lowest is used for evaluation (see line 217 in ```helper_functions.h```) since the slowest vehicle might have an impact on the other cars of its lane in the near future.
+
+For me, it was especially important to identify the areas right next to the ego vehicle as absolute no-go-zones, in case there is another vehicle. This was achieved by adding a exponential function with a high weight (around x=0), as you can see on the image above.  
 
 ### Finite state machine 
 
@@ -76,7 +79,10 @@ During the course of this project, I noticed quickly that behavior planning can 
 
 [![Finite State Machine - from Udacity course material](./media/finite_state_machine.png)](./media/finite_state_machine.png)
 
-This was extremely helpful to make sure, that lane changes are actually executed when it is safe and until they are completely finished. All the code is stored in a separate helper function ```state_machine.h```. With less than 100 lines of code, a clear and structured vehicle behavior was achievable within this project.  
+This was extremely helpful to make sure, that lane changes are actually executed when it is safe and until they are completely finished. All the code is stored in a separate helper function ```state_machine.h```. With less than 100 lines of code, a clear and structured vehicle behavior was achievable within this project. 
+
+
+
 
 # Original Readme by Udacity
 
